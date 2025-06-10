@@ -35,6 +35,6 @@ training_cfg = dict(
 )
 
 data = dict(
-    dataset_path="/cm/shared/toannt28/grasp-anything",
+    dataset_path="../data/Grasp-Anything-6D",
     num_neg_prompts=4
 )

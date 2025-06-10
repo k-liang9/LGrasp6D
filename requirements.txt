@@ -5,3 +5,5 @@ torchaudio
 gorilla-core
 open_clip_torch
 pytorchse3
+gorilla
+six
