@@ -1,4 +1,4 @@
-from dataset import Grasp6DDataset_Train
+from dataset import ZippedGrasp6DDataset_Train
 from models import *
 from utils.config_utils import simple_weights_init
 from torch.utils.data import DataLoader
@@ -26,7 +26,7 @@ def build_dataset(cfg):
         data_info = cfg.data
         dataset_path = data_info.dataset_path     # get the path to the dataset
         num_neg_prompts = data_info.num_neg_prompts   # get the maximum number of negative prompts
-        train_set = Grasp6DDataset_Train(dataset_path, num_neg_prompts=num_neg_prompts) # the training set
+        train_set = ZippedGrasp6DDataset_Train(dataset_path, num_neg_prompts=num_neg_prompts) # the training set
         dataset_dict = dict(
             train_set=train_set,
         )
