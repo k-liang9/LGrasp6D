@@ -27,16 +27,17 @@ if __name__ == "__main__":
     print("Training from scratch!")
 
     dataset_dict = build_dataset(cfg)
+    print(len(dataset_dict['train_set']))
     loader_dict = build_loader(cfg, dataset_dict)
     optim_dict = build_optimizer(cfg, model)
+    
+    # training = dict(
+    #     model=model,
+    #     dataset_dict=dataset_dict,
+    #     loader_dict=loader_dict,
+    #     optim_dict=optim_dict,
+    #     logger=logger
+    # )
 
-    training = dict(
-        model=model,
-        dataset_dict=dataset_dict,
-        loader_dict=loader_dict,
-        optim_dict=optim_dict,
-        logger=logger
-    )
-
-    task_trainer = Trainer(cfg, training)
-    task_trainer.run()
+    # task_trainer = Trainer(cfg, training)
+    # task_trainer.run()

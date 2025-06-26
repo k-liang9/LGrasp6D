@@ -2,7 +2,7 @@ import os
 
 
 exp_name = "Denoiser"
-seed = 1
+seed = 42
 log_dir = os.path.join("./log/", exp_name)
 try:
     os.makedirs(log_dir)
@@ -35,6 +35,6 @@ training_cfg = dict(
 )
 
 data = dict(
-    dataset_path="../data/Grasp-Anything-6D",
+    dataset_path="data/Grasp-Anything-6D",
     num_neg_prompts=4
 )
