@@ -26,7 +26,8 @@ def build_dataset(cfg):
         data_info = cfg.data
         dataset_path = data_info.dataset_path     # get the path to the dataset
         num_neg_prompts = data_info.num_neg_prompts   # get the maximum number of negative prompts
-        train_set = ZippedGrasp6DDataset_Train(dataset_path, num_neg_prompts=num_neg_prompts) # the training set
+        log_dir = cfg.log_dir
+        train_set = ZippedGrasp6DDataset_Train(dataset_path, log_dir, num_neg_prompts=num_neg_prompts) # the training set
         dataset_dict = dict(
             train_set=train_set,
         )

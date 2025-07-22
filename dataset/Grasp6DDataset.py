@@ -5,7 +5,9 @@ import numpy as np
 from torch.utils.data import Dataset
 from pytorchse3.se3 import se3_log_map
 import zipfile
-import inspect
+import multiprocessing as mp
+from utils import IOStream
+import time
 
 MAX_WIDTH = 0.202   # maximum width of gripper 2F-140
 
@@ -127,7 +129,7 @@ class ZippedGrasp6DDataset_Train(Dataset):
     """
     data loading class for training without unzipping
     """
-    def __init__(self, dataset_path:str, num_neg_prompts=4):
+    def __init__(self, dataset_path:str, log_dir:str, num_neg_prompts=4):
         """
         dataset_path (str): path to the dataset
         num_neg_prompts: number of negative prompts used in training
@@ -135,67 +137,67 @@ class ZippedGrasp6DDataset_Train(Dataset):
         super().__init__()
         self.dataset_path = dataset_path
         self.num_neg_prompts = num_neg_prompts
+        self.log_dir = log_dir
+        self.logger = IOStream(os.path.join(log_dir, "run.log"))
         self._load()
         
     def _load(self):
         self.all_data = []
+        
         try:
             pc_zip = zipfile.ZipFile(f'{self.dataset_path}/pc.zip')
-            grasp_prompt_zip = zipfile.ZipFile(f'{self.dataset_path}/grasp_prompt.zip')
-            grasp_zip = zipfile.ZipFile(f'{self.dataset_path}/grasp.zip')
         except Exception as e:
-            print(f'error with opening zip files: {e}')
+            self.logger.cprint(f'error with opening pc zip file: {e}')
             return
-        
-        filenames = sorted(pc_zip.namelist())
-        print(f'number of files: {len(filenames)}')
-        
-        print("processing dataset for training!")
-        try:
-            filenames = filenames[:int(len(filenames)*4/5)]
-            
-            for filename in filenames:
-                scene, _ = os.path.splitext(filename)
-                
-                try:
-                    with pc_zip.open(f'{scene}.npy') as f:
-                        pc = np.load(f)
-                except Exception as e:
-                    print(f'error with loading point cloud: {e}')
-                    continue
 
-                try:
-                    with grasp_prompt_zip.open(f'{scene}.pkl') as f:
-                        prompts = pickle.load(f)
-                except Exception as e:
-                    print(f'error with loading grasp prompts: {e}')
-                    continue
+        num_processes = len(os.sched_getaffinity(0))
+        self.logger.cprint(f'number of cores: {num_processes}')
+        filenames = sorted(pc_zip.namelist())
+        filenames = filenames[:int(len(filenames)*4/5)]
+        filenames_chunks = np.array_split(np.array(filenames), num_processes)
+        pc_zip.close()
+        
+        self.logger.cprint(f'number of files: {len(filenames)}')
+        self.logger.cprint("processing dataset for training!")
+        
+        try:
+            processes = []
+            queue = mp.Queue()
+            filecount_lock = mp.Lock()
+            filecount = mp.Value('i', 0)
+            logger_lock = mp.Lock()
+            for i in range(num_processes):
+                p = mp.Process(
+                    target=load_dataset_worker,
+                    args=(
+                        filenames_chunks[i].tolist(),
+                        self.dataset_path,
+                        self.num_neg_prompts,
+                        self.log_dir,
+                        i,
+                        (filecount, filecount_lock, logger_lock),
+                        queue
+                    )
+                )
+                p.start()
+                processes.append(p)
+                self.logger.cprint(f'process {i} started')
+            
+            all_data = [[] for _ in range(num_processes)]
+            for i in range(num_processes):
+                process_id, data = queue.get()
+                if data == []:
+                    self.logger.cprint(f'process {i} failed')
+                    return
+                all_data[process_id] = data
+                self.logger.cprint(f'extracted data from process {process_id}')
+            
+            for i in range(num_processes):
+                self.all_data.extend(all_data[i])
+                processes[i].join()
                 
-                num_objects = len(prompts)
-                for i in range(num_objects):
-                    try:
-                        with grasp_zip.open(f"{scene}_{i}.pkl") as f:
-                            Rts, ws = pickle.load(f)
-                    except Exception as e:
-                        print(f'error with loading grasps: {e}')
-                        continue
-                    pos_prompt = prompts[i]
-                    neg_prompts = prompts[:i] + prompts[i+1:]
-                    real_num_neg_prompts = len(neg_prompts)
-                    if 0 < real_num_neg_prompts < self.num_neg_prompts:
-                        neg_prompts = neg_prompts + [neg_prompts[-1]] * (self.num_neg_prompts - real_num_neg_prompts)
-                    elif real_num_neg_prompts == 0:
-                        neg_prompts = [""] * self.num_neg_prompts
-                    else:
-                        neg_prompts = neg_prompts[:self.num_neg_prompts]
-                        
-                    self.all_data.extend([{"scene": scene, "pc": pc, "pos_prompt": pos_prompt, "neg_prompts": neg_prompts, "Rt": Rt, "w": 2*w/MAX_WIDTH-1.0} for Rt, w in zip(Rts, ws)])
         except Exception as e:
-            print(f'error on loading process: {e}')
-        finally:
-            pc_zip.close()
-            grasp_prompt_zip.close()
-            grasp_zip.close()
+            self.logger.cprint(f'error in multiprocessing: {e}')
         
         return self.all_data
         
@@ -208,10 +210,92 @@ class ZippedGrasp6DDataset_Train(Dataset):
     
     def __len__(self):
         return len(self.all_data)
-        
+
+def log(logger, logger_lock, msg):
+    try:
+        with logger_lock:
+            try:
+                logger.cprint(msg)
+            except Exception as log_exc:
+                print(f"Logging failed: {log_exc}")
+    except Exception as lock_exc:
+        print(f"Logger lock failed: {lock_exc}")
+
+def load_dataset_worker(filenames, dataset_path, num_neg_prompts, log_dir, worker_id, shared_resources, queue):
+    #TODO: investigate purpose of pc_mask
+    logger = IOStream(os.path.join(log_dir, "run.log"))
+    filecount, filecount_lock, logger_lock = shared_resources
+
+    try:
+        pc_zip = zipfile.ZipFile(f'{dataset_path}/pc.zip')
+        grasp_prompt_zip = zipfile.ZipFile(f'{dataset_path}/grasp_prompt.zip')
+        grasp_zip = zipfile.ZipFile(f'{dataset_path}/grasp.zip')
+    except Exception as e:
+        log(logger, logger_lock, f'error with loading zip files on process {worker_id}: {e}')
+        queue.put((worker_id, []))
+        return
+    
+    data = []
+    try:
+        count = 0
+        for filename in filenames:
+            filename = os.path.basename(filename)
+            scene, _ = os.path.splitext(filename)
+            
+            try:
+                with pc_zip.open(f'pc/{scene}.npy') as f:
+                    pc = np.load(f)
+            except Exception as e:
+                log(logger, logger_lock, f'error with loading point cloud: {e}')
+                continue
+
+            try:
+                with grasp_prompt_zip.open(f'grasp_prompt/{scene}.pkl') as f:
+                    prompts = pickle.load(f)
+            except Exception as e:
+                log(logger, logger_lock, f'error with loading grasp prompts: {e}')
+                continue
+            
+            num_objects = len(prompts)
+            for i in range(num_objects):
+                try:
+                    with grasp_zip.open(f"grasp/{scene}_{i}") as f:
+                        Rts, ws = pickle.load(f)
+                except Exception as e:
+                    continue
+                
+                pos_prompt = prompts[i]
+                neg_prompts = prompts[:i] + prompts[i+1:]
+                real_num_neg_prompts = len(neg_prompts)
+                if 0 < real_num_neg_prompts < num_neg_prompts:
+                    neg_prompts = neg_prompts + [neg_prompts[-1]] * (num_neg_prompts - real_num_neg_prompts)
+                elif real_num_neg_prompts == 0:
+                    neg_prompts = [""] * num_neg_prompts
+                else:
+                    neg_prompts = neg_prompts[:num_neg_prompts]
+                
+                data.extend([{"scene": scene, "pc": pc, "pos_prompt": pos_prompt, "neg_prompts": neg_prompts, "Rt": Rt, "w": 2*w/MAX_WIDTH-1.0} for Rt, w in zip(Rts, ws)])
+            
+            count += 1
+            if count == 10000:
+                with filecount_lock:
+                    filecount.value += 10000
+                log(logger, logger_lock, f'processed {filecount.value} scenes')
+                count = 0
+            
+    except Exception as e:
+        log(logger, logger_lock, f'error on loading process: {e}')
+    finally:
+        pc_zip.close()
+        grasp_prompt_zip.close()
+        grasp_zip.close()
+
+    queue.put((worker_id, data))
 
 
-class Grasp6DDataset_Test(Dataset):
+
+
+class ZippedGrasp6DDataset_Test(Dataset):
     """
     Zipped data loading class for testing.
     """

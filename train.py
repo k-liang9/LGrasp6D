@@ -12,11 +12,12 @@ def parse_args():
     return args
 
 
+args = parse_args()
+cfg = Config.fromfile(args.config)
+    
+logger = IOStream(os.path.join(cfg.log_dir, "run.log"))
+
 if __name__ == "__main__":
-    args = parse_args()
-    cfg = Config.fromfile(args.config)
-        
-    logger = IOStream(os.path.join(cfg.log_dir, "run.log"))
     if cfg.get("seed") is not None:
         set_random_seed(cfg.seed)
         logger.cprint("Set seed to %d" % cfg.seed)
@@ -24,20 +25,21 @@ if __name__ == "__main__":
     model = model.to("cuda")
     model = torch.nn.DataParallel(model)
     
-    print("Training from scratch!")
+    logger.cprint("Training from scratch!")
 
     dataset_dict = build_dataset(cfg)
-    print(len(dataset_dict['train_set']))
     loader_dict = build_loader(cfg, dataset_dict)
+    logger.cprint('built dataloader')
     optim_dict = build_optimizer(cfg, model)
+    logger.cprint('built optimizer')
     
-    # training = dict(
-    #     model=model,
-    #     dataset_dict=dataset_dict,
-    #     loader_dict=loader_dict,
-    #     optim_dict=optim_dict,
-    #     logger=logger
-    # )
+    training = dict(
+        model=model,
+        dataset_dict=dataset_dict,
+        loader_dict=loader_dict,
+        optim_dict=optim_dict,
+        logger=logger
+    )
 
-    # task_trainer = Trainer(cfg, training)
-    # task_trainer.run()
+    task_trainer = Trainer(cfg, training)
+    task_trainer.run()
