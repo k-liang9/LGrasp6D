@@ -28,6 +28,9 @@ if __name__ == "__main__":
     logger.cprint("Training from scratch!")
 
     dataset_dict = build_dataset(cfg)
+    
+    logger.cprint(f"number of entries in dataset_dict: {len(dataset_dict['train_set'])}")
+    
     loader_dict = build_loader(cfg, dataset_dict)
     logger.cprint('built dataloader')
     optim_dict = build_optimizer(cfg, model)
