@@ -1,7 +1,8 @@
-from dataset import ZippedGrasp6DDataset_Train
+from dataset import Grasp6DDataset_Train, Grasp6DDataset
 from models import *
 from utils.config_utils import simple_weights_init
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 from torch.optim import Adam
 
 
@@ -17,35 +18,72 @@ init_pool = {
     "simple_weights_init": simple_weights_init
 }
 
+def build_dataset_sample_mappings(cfg, is_train):
+    log_dir = cfg.log_dir
+    dataset_path = cfg.data.dataset_path
+    num_workers = cfg.hardware.num_cpus
+    from dataset.Grasp6DDataset import Grasp6DDataset
+    samples_map = Grasp6DDataset.create_sample_mappings(dataset_path, log_dir, is_train, num_workers)
+    return samples_map
 
-def build_dataset(cfg):
-    """
-    Function to build the dataset.
-    """
-    if hasattr(cfg, "data"):
-        data_info = cfg.data
-        dataset_path = data_info.dataset_path     # get the path to the dataset
-        num_neg_prompts = data_info.num_neg_prompts   # get the maximum number of negative prompts
-        log_dir = cfg.log_dir
-        train_set = ZippedGrasp6DDataset_Train(dataset_path, log_dir, num_neg_prompts=num_neg_prompts) # the training set
-        dataset_dict = dict(
-            train_set=train_set,
-        )
-        return dataset_dict
-    else:
-        raise ValueError("Configuration does not have data config!")
+def build_dataset(cfg, samples_map, is_train=True):
+    dataset_path = cfg.data.dataset_path
+    log_dir = cfg.data.log_dir
+    num_workers = cfg.train.num_workers
+    
+    # Use pre-computed samples_map (passed as parameter)
+    # Create the dataset with correct parameters
+    num_neg_prompts = getattr(cfg.data, 'num_neg_prompts', 4)
+    
+    train_set = Grasp6DDataset_Train(
+        dataset_path=dataset_path,
+        log_dir=log_dir, 
+        samples_mapping=samples_map,
+        num_neg_prompts=num_neg_prompts
+    )
+    
+    return train_set
 
-
-def build_loader(cfg, dataset_dict):
+def build_loader(cfg, dataset_dict, rank=0, world_size=1):
     """
-    Function to build the loader
+    Function to build the loader with distributed sampling and streaming optimizations
     """
     train_set = dataset_dict["train_set"]
-    train_loader = DataLoader(train_set, batch_size=cfg.training_cfg.batch_size, shuffle=True, drop_last=False, num_workers=8)
+    
+    # Create distributed sampler if using multiple GPUs
+    sampler = None
+    shuffle = True
+    
+    if world_size > 1:
+        sampler = DistributedSampler(
+            train_set,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=True,
+            drop_last=False
+        )
+        shuffle = False  # DistributedSampler handles shuffling
+    
+    # Optimize workers and add streaming features
+    num_workers = max(1, cfg.hardware.get('num_cpus', 4) // world_size)
+    
+    train_loader = DataLoader(
+        train_set, 
+        batch_size=cfg.training_cfg.batch_size, 
+        shuffle=shuffle,
+        sampler=sampler,
+        drop_last=False, 
+        num_workers=num_workers,
+        prefetch_factor=2,      # Prefetch 2 batches per worker
+        pin_memory=True,        # Faster GPU transfer
+        persistent_workers=True # Keep workers alive between epochs
+    )
+    
     loader_dict = dict(
         train_loader=train_loader,
+        sampler=sampler
     )
-
+    
     return loader_dict
 
 

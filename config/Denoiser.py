@@ -38,3 +38,8 @@ data = dict(
     dataset_path="data/Grasp-Anything-6D",
     num_neg_prompts=4
 )
+
+hardware = dict(
+    num_cpus=36,
+    world_size=4
+)

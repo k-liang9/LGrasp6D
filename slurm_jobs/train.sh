@@ -2,9 +2,9 @@
 #SBATCH --time=0-10:00
 #SBATCH --account=def-r6buchan
 #SBATCH --exclusive
-#SBATCH --mem=256G
-#SBATCH --gpus-per-node=a100:1
-#SBATCH --cpus-per-task=32
+#SBATCH --mem=350G
+#SBATCH --gpus-per-node=v100:8
+#SBATCH --cpus-per-task=40
 #SBATCH --output=train.log
 #SBATCH --mail-user=k24liang@uwaterloo.ca
 #SBATCH --mail-type=BEGIN,END,FAIL

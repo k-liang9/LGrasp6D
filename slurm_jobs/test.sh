@@ -1,10 +1,14 @@
 #!/bin/bash
-#SBATCH --time=0-1:00
+#SBATCH --time=1-00:00
 #SBATCH --account=def-r6buchan
-#SBATCH --mem=16G
-#SBATCH --gpus-per-node=a100:1
-#SBATCH --cpus-per-task=2
+#SBATCH --partition=gpubase_bynode_b4
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=48
+#SBATCH --gres=gpu:a100:4
+#SBATCH --mem=498G
 #SBATCH --output=test.log
+#SBATCH --error=test.log
 #SBATCH --mail-user=k24liang@uwaterloo.ca
 #SBATCH --mail-type=BEGIN,END,FAIL
 
